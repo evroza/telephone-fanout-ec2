@@ -4,6 +4,7 @@ var IO = require('socket.io');
 var socketioJwt   = require("socketio-jwt");
 var router = express.Router();
 const _ = require('lodash');
+const uuidv4 = require('uuid/v4');
 
 var app = express();
 var server = require('http').Server(app);
@@ -31,6 +32,40 @@ var groupSeqTimer = {};
 	}
 */
 var serverMessages = {untagged: []};
+
+
+// broadcasts [Array]- Stores array of boraodcast messages initiated by server as well as associated metadata
+/*
+	{
+		id: UUID,
+		groupID: groupID,
+		content: 'Message text contents',
+		timeInit: TimeStamp,
+		telephones: [
+			{
+				telephoneSerial: 'Telephone 1 Serial',
+				socketID: socket ID of telephone client,
+				timeStampACK: 'Time stamp of when message acknowledgement was returned',
+				clickedCTATime: [Array of timestamps when clicked by this telephone]			
+			}, ...],
+		displayOnFirstTelephone: True|False [Default True],
+		displayOnAllTelephones: True|False [Default False] - only displays this broadcast message on first responder,
+		firstACKReceived: True|False - [Default  False], turns true on first ACK receipt, Subsequent ACKS, in this 
+							broadcast don't alter it's value. Used to trigger private conversation with the first responder, 
+							then switched to true, subsequent ACKs find it's already true and don't try to trigger private conversation
+		firstResponderACK: {
+							    telephoneSerial: Telephone Serial of first responder,
+								socketID: current socket ID of First responder	
+							
+							}
+		
+		
+		.
+		.
+		.
+	}
+*/
+
 
 //// With socket.io >= 1.0 ////
 socketIO.set('authorization', socketioJwt.authorize({
