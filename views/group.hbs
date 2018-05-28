@@ -28,7 +28,7 @@
       padding-left: 5px;
       font-size: 12px;
     }
-    #users {
+    #telephones {
       width: 490px;
       padding: 0 5px 5px;
     }
@@ -36,9 +36,9 @@
 </head>
 <body>
   Telephone Serial: <span id="telephoneSerial"></span> <br/>
-  Group: {{roomID}} <br/>
-  Active Telephones: <span id="count">{{users.length}}</span> <br/>
-  Online Telephone Serials:  <div id="users">{{users}}</div>
+  Group: {{groupID}} <br/>
+  Active Telephones: <span id="count">{{telephones.length}}</span> <br/>
+  Online Telephone Serials:  <div id="telephones">{{telephones}}</div>
 
   <div id="msglog">
 
@@ -78,6 +78,7 @@
 
       // 加入房间
       socket.on('connect', function () {
+	  
 		//Change when the join group logic
 		// currently join on connect, can auto join if persisted in DB 
 		// Then only marked as active/inactive in a joined group
@@ -95,6 +96,26 @@
         $('#msglog').append(message);
         // 滚动条保持最下方
         $('#msglog').scrollTop($('#msglog')[0].scrollHeight);  
+      });
+	  
+	  socket.on('broadcast', function (msg) {
+	  var message = '';
+		// First MANUALLY submit acknowledgement to server if message in sequence is msg.STARTMESSAGE
+		socket.send({				
+			telephoneSerial,
+			broadcastID: msg.messageID,
+			clientReceivedAt: new Date().getTime()
+		});
+		message = '' +
+		'<div class="message" id="' + msg.messageID +'">' +
+		'  <span class="user"> BROADCAST : </span>' +
+		'  <span class="msg">TimeStamp:' + new Date().getTime() + ',' + msg.content + '</span>' +
+		'</div>';
+	  
+        
+        $('#msglog').append(message);
+        // 滚动条保持最下方
+        $('#msglog').scrollTop($('#msglog')[0].scrollHeight); 
       });
 	  
 	  socket.on('privateSequence', function (telephoneSerial, msg) {
@@ -140,12 +161,12 @@
       });
 
       // 监听系统消息
-      socket.on('sys', function (sysMsg, users) {
+      socket.on('sys', function (sysMsg, telephones) {
         var message = '<div class="sysMsg">' + sysMsg + '</div>';
         $('#msglog').append(message);
 
-        $('#count').text(users.length);
-        $('#users').text(users);
+        $('#count').text(telephones.length);
+        $('#telephones').text(telephones);
       });
 	  
 	  // 删除消息
