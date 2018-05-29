@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+  <meta charset="UTF-8">
+  <title>{{roomID}}</title>
+  <style>
+    #msglog, #messageInput {
+      border: 1px solid #ccc;
+      width: 500px;
+      height: 350px;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+    #messageInput {
+      height: 80px;
+    }
+    .message {
+      line-height: 22px;
+    }
+    .message .user {
+      padding-right: 5px;
+      padding-left: 5px;
+      color: brown;
+    }
+    .sysMsg {
+      color: #c1bfbf;
+      padding-right: 5px;
+      padding-left: 5px;
+      font-size: 12px;
+    }
+    #telephones {
+      width: 490px;
+      padding: 0 5px 5px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="telephoneInfo" >
+	<div>Telephone Serial: <span id="telephoneSerial"></span></div>
+	<div>Current Group: {{groupID}}</div>
+	<div>My Groups: {{groupList}}</div>
+	<div>Active Telephones: <span id="count">{{telephones.length}}</span></div>
+	<div>Online Telephone Serials:  <div id="telephones">{{telephones}}</div></div>
+</div>
+
+
+  <div id="msglog">
+
+  </div>
+  <textarea name="message" id="messageInput"></textarea>
+  <br/>
+  Press enter to send message
+  <button id="joinOrLeave">Deactivate Listening</button>
+  
+  <!-- auth token received from server -->
+  <div id="tokenInput" style="display: none;" value="{{token}}"></div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/jquery.js"></script>
+  <script>
+    $(function () {
+	
+	  var telephoneSerial = '';
+	  var token = $("#tokenInput").attr("value");
+	  
+	  var parseJwt = function (token) {
+            var base64Url = token.split('.')[1];
+            var base64 = base64Url.replace('-', '+').replace('_', '/');
+            return JSON.parse(window.atob(base64));
+      };
+	  
+	  
+	  try {
+		tokenPayload = parseJwt(token);
+	  } catch(err) {
+		console.error("Unable to parse payload in JWT token");
+		console.error(err);
+	  }
+	  
+	  
+	  if(!token){
+		alert("There's a problem with this page. Please try to login again");
+		console.error("There's a problem with this page. Please try to login again!");
+		// After five seconds redirect to login page
+		setTimeout(()=>{ window.location.replace(window.location.origin + "/login.html")}, 5000)
+	  }
+	  
+      
+      telephoneSerial = tokenPayload["telephone"]["TelephoneSerial"];
+	  
+      $('#telephoneSerial').text(telephoneSerial);
+	  
+	 
+      // ---------创建连接-----------
+      //var socket = io();
+	  
+	  var socket = io.connect('', {
+		query: 'token=' + token
+	  });
+
+      // 加入房间
+      socket.on('connect', function () {
+	  console.log("connected");
+	  
+		//Change when the join group logic
+		// currently join on connect, can auto join if persisted in DB 
+		// Then only marked as active/inactive in a joined group
+        socket.emit('join', telephoneSerial);
+      });
+	  
+	  socket.on("unauthorized", function(error) {
+		  if (error.data.type == "UnauthorizedError" || error.data.code == "invalid_token") {
+			// redirect user to login page perhaps?
+			console.log("User's token has expired");
+			setTimeout(()=>{ window.location.replace(window.location.origin + "/login.html")}, 5000)
+		  }
+		});
+
+      // 监听消息
+      socket.on('msg', function (telephoneSerial, msg) {
+	  console.log(telephoneSerial,msg);
+        var message = '' +
+            '<div class="message" id="' + msg.messageID + '">' +
+            '  <span class="user">' + telephoneSerial + ': </span>' +
+            '  <span class="msg">' + msg.content + '</span>' +
+            '</div>';
+        $('#msglog').append(message);
+        // 滚动条保持最下方
+        $('#msglog').scrollTop($('#msglog')[0].scrollHeight);  
+      });
+	  
+	  socket.on('broadcast', function (msg) {
+	  var message = '';
+		// First MANUALLY submit acknowledgement to server if message in sequence is msg.STARTMESSAGE
+		socket.send({				
+			telephoneSerial,
+			broadcastID: msg.messageID,
+			clientReceivedAt: new Date().getTime()
+		});
+		message = '' +
+		'<div class="message" id="' + msg.messageID +'">' +
+		'  <span class="user"> BROADCAST : </span>' +
+		'  <span class="msg">TimeStamp:' + new Date().getTime() + ',' + msg.content + '</span>' +
+		'</div>';
+	  
+        
+        $('#msglog').append(message);
+        // 滚动条保持最下方
+        $('#msglog').scrollTop($('#msglog')[0].scrollHeight); 
+      });
+	  
+	  socket.on('privateSequence', function (telephoneSerial, msg) {
+        var message = '' +
+            '<div class="message">' +
+            '  <span class="user"> PRIVATE: </span>' +
+            '  <span class="msg">' + msg + '</span>' +
+            '</div>';
+        $('#msglog').append(message);
+        // 滚动条保持最下方
+        $('#msglog').scrollTop($('#msglog')[0].scrollHeight);  
+      });
+	  
+	  function mockSequence() {}
+	  
+	  socket.on('sequence', function (telephoneSerialRcvd, msg) {
+		var message = '';
+		// First MANUALLY submit acknowledgement to server if message in sequence is msg.STARTMESSAGE
+		if(typeof msg === 'object' && msg.content === 'STARTMESSAGE'){
+			socket.send({
+				
+				telephoneSerial,
+				clientReceivedAt: new Date().getTime()
+			});
+			message = '' +
+            '<div class="message" id="' + msg.messageID +'">' +
+            '  <span class="user"> BROADCAST : </span>' +
+            '  <span class="msg">TimeStamp:' + new Date().getTime() + ',' + msg.content + '</span>' +
+            '</div>';
+		} else{
+			message = '' +
+				'<div class="message">' +
+				'  <span class="user">' + telephoneSerialRcvd + ': </span>' +
+				'  <span class="msg">TimeStamp:' + new Date().getTime() + ',' + msg + '</span>' +
+				'</div>';
+		}
+		
+	  
+        
+        $('#msglog').append(message);
+        // 滚动条保持最下方
+        $('#msglog').scrollTop($('#msglog')[0].scrollHeight);  
+      });
+
+      // 监听系统消息
+      socket.on('sys', function (sysMsg, telephones) {
+        var message = '<div class="sysMsg">' + sysMsg + '</div>';
+        $('#msglog').append(message);
+
+        $('#count').text(telephones.length);
+        $('#telephones').text(telephones);
+      });
+	  
+	  // 删除消息
+      socket.on('sysDelMess', function (messageID) {
+	  
+        $("'#" + messageID + "'").remove();
+		
+      });
+
+      // 发送消息
+      $('#messageInput').keydown(function (e) {
+        if (e.which === 13) {
+          e.preventDefault();
+          var msg = $(this).val();
+          $(this).val('');
+
+          socket.send(msg);
+        }
+      });
+
+      // Exit Group
+      $('#joinOrLeave').click(function () {
+        if ($(this).text() === 'Exit Group') {
+          $(this).text('Activate Listening');
+          socket.emit('leave');
+          var msg = 'You shall no longer receive messages from server, Click "Listen"';
+          $('#msglog').append('<div class="sysMsg">'+msg+'</div>');
+        } else {
+          $(this).text('Deactivate Listening');
+          socket.emit('join', telephoneSerial);
+        }
+
+      });
+    });
+  </script>
+</body>
+</html>
