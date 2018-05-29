@@ -2,12 +2,14 @@ var express = require('express');
 var path = require('path');
 var IO = require('socket.io');
 var socketioJwt   = require("socketio-jwt");
+const jwt = require('jsonwebtoken');
 var router = express.Router();
 const _ = require('lodash');
 const uuidv4 = require('uuid/v4');
 //uuidv4(); // ⇨ '416ac246-e7ac-49ff-93b4-f7e94d997e6b'
 
-const telephoneUtils = require('./');
+//const telephoneUtils = require('./');
+const JWT_SECRET = 'sshhhhhhh';
 
 var app = express();
 var server = require('http').Server(app);
@@ -101,38 +103,93 @@ var activeClients = {};
 
 
 //// With socket.io >= 1.0 ////
-socketIO.set('authorization', socketioJwt.authorize({
-  secret: 'sshhhhhhh',
+socketIO.use(socketioJwt.authorize({
+  secret: JWT_SECRET,
   handshake: true
 }));
 ///////////////////////////////
 
 socketIO.on('connection', function (socket) {
-  // 获取请求建立socket连接的url
-  // 如: http://localhost:3000/group/group_1, groupID为group_1
-  var url = socket.request.headers.referer;
-  var splited = url.split('/');
-  var groupID = splited[splited.length - 1];   // 获取组建ID
+
+  var groupID = socket.decoded_token["telephone"]["groups"][0];   // 获取组建ID // 
+  var currentGroupID = '';
+  console.log(socket.decoded_token,"####################################");	
+  /*
+  Decoded token example:
+	{ telephone:
+	   { groups: [ 'group_1', 'group_2', 'group_6' ],
+		 TelephoneSerial: 'Tel_323456789',
+		 LastLogin: 1527603746783,
+		 Active: true,
+		 CreatedAt: 1527593748588 },
+	  iat: 1527603823,
+	  exp: 1527611023 
+	}
+  */
+  
+  
   var telephone = '';
   
 
   socket.on('join', function (telephoneSerial) {
-    telephone = telephoneSerial;
+    let decoded_token = socket.decoded_token["telephone"];
+	currentGroupID = decoded_token["groups"][0];
+	if(!telephoneSerial === socket.decoded_token["telephone"]["TelephoneSerial"]) {
+		console.error("Security Breach: Client is probably tampering with tokens");
+		console.log("Serial: ", telephoneSerial, " Token: ", token);
+		socket.emit('disconnect')
+	}
+	
+	telephone = decoded_token["TelephoneSerial"];
+	
+	// 1. Add Clients to all groups in its token payload
+	// 2. Add Client to Active Clients list data structure
+	// 3. Mark client as active in DynamoDB
+	
+	try {
+		
+		// 将电话号昵称加入组建名单中
+		for(let i=0; i < decoded_token["groups"].length; i++) {
+			// If group doesn't exist in live group list, first add it to group_list
+			if (!groupInfo[decoded_token["groups"][i]]) {
+			  groupInfo[decoded_token["groups"][i]] = {};	// add the group to group list if it doesn't exist		  
+			}
+			
+			// Next confirm if telephone client doesn't already exist in the active group list & Active Clients list, if it does
+			// Then take it out and then add afresh
+			if (!activeClients[telephone]) {
+				// Add to active telephones list
+				activeClients["telephone"] = {
+					socketID: socket.id,
+					lastLogin: new Date().getTime(),
+					recentMessages: []
+				};
+				
+				// Add telephone to each group it is registered
+				groupInfo[decoded_token["groups"][i]][telephone] = socket.id;
+				socket.join(groupInfo[decoded_token["groups"][i]]);    // 加入组建
+			}
+		}
+		
+		
+		//以后可以保存在数据库 - save group data to db for persistence
+		// If got here then client successfully added to groups and active list - Change client DynamoDB record - Active: true
+		dbChangeClientStatus(telephone, true);
+		
+		// 通知组建内人员
+		socketIO.to(groupID).emit('sys', telephone + '加入了组建', Object.keys(groupInfo[groupID]));  
+		console.log(telephone + '加入了' + groupID);
+		
+		
+	} catch(err){
+		console.error("There was a error handling the token data on client join");
+		console.error(err);
+		console.log("Client: ", telephone, "; Time: ", new Date().getTime());
+	}
 
-    // 将电话号昵称加入组建名单中
-    if (!groupInfo[groupID]) {
-      groupInfo[groupID] = {};
-	  
-    }
-    groupInfo[groupID][telephone] = socket.id;
-	//以后可以保存在数据库 - save group data to db for persistence
-
-    socket.join(groupID);    // 加入组建
-    // 通知组建内人员
-    socketIO.to(groupID).emit('sys', telephone + '加入了组建', Object.keys(groupInfo[groupID]));  
-    console.log(telephone + '加入了' + groupID);
+    
   });
-
+  
   socket.on('leave', function () {
     socket.emit('disconnect');
   });
@@ -145,26 +202,47 @@ socketIO.on('connection', function (socket) {
 	if(reason === "transport close" && reason === "ping timeout" && reason === "Transport error"){
 		// If here then reason was possible proper disconnect, so mark client as inactive,; otherwise leave him on list and
 		// let message failures to his client cause him to be removed from list
-		
-		// Step 1 - mark telephone client as inactive (in DB)
-		// Step 2 - Take telephone client off the active list --> groupInfo
-		//			Lists to take client off:
-		//				a) groupInfo > from each group list - have to loop NB: reason is not to take client from persisted groups in db.
-		//																	- reason is to take him off the live working list on server
-		//				b) 
-		
+			
 		if (groupInfo[groupID][telephone]) {
 		  delete groupInfo[groupID][telephone];
 		}
 		
+	} else {
+		// This case means client disconnected by clicking the inactivate button - so mark as Inactive and post to DB
+		// Step 0 - Unsubscribe client from all Socket IO rooms he's listening
+		// Step 1 - Take telephone client off the active lists --> groupInfo
+		//			Lists to take client off:
+		//				a) groupInfo > from each group list - have to loop NB: reason is not to take client from persisted groups in db.
+		//																	- reason is to take him off the live working list on server
+		//				b) activeClients list
+		// Step 2 - mark telephone client as inactive (in DB)
+		
+		console.log(reason, "+++++++++++++++++++++++++++++");
+		
+		for(let i=0; i < decoded_token['groups'].length; i++) {
+			// Leave each socket group in list
+			// But don't deregister in DB, just here to make it inactive
+			socket.leave(decoded_token['groups'][i]);    // 退出组建
+			socketIO.to(decoded_token['groups'][i]).emit('sys', telephone + '退出了组建', Object.keys(groupInfo[decoded_token['groups'][i]]));
+			console.log(telephone + 'exit group' + groupID);
+			
+			//for each group in groupInfo active clients OBJECT list, remove this telephone groupInfo[decoded_token['groups'][i]]
+			if (groupInfo[decoded_token['groups'][i]][decoded_token["TelephoneSerial"]]){
+				// delete this telephone OBJECT (not string) from groupInfo[group] array 
+				delete groupInfo[decoded_token['groups'][i]][decoded_token["TelephoneSerial"]];
+			} 
+			
+		}
+		
+		// Next take client off activeClients list
+		if(activeClients[decoded_token["TelephoneSerial"]]){
+			// Telephone is active - remove it
+			delete activeClients[decoded_token["TelephoneSerial"]];
+		}
+		
 	}
     
-	
-	console.log(reason, "+++++++++++++++++++++++++++++");
-	
-    socket.leave(groupID);    // 退出组建
-    socketIO.to(groupID).emit('sys', telephone + '退出了组建', Object.keys(groupInfo[groupID]));
-    console.log(telephone + '退出了' + groupID);
+    
   });
 
   // 接收电话号消息,发送相应的组建
@@ -186,7 +264,7 @@ socketIO.on('connection', function (socket) {
 		//let message = {content: 'STARTMESSAGE', messageID: Math.floor(Date.now() / 1000 * Math.random())};
 		//socketIO.to(groupID).emit('sequence',telephone, message); // Broadcast to all telephones in group
 		
-		initBroadcast(socketIO, 'group_1', "Nakuona msee ------- nakuona na ii broadcast");
+		initBroadcast(socketIO, currentGroupID, "Nakuona msee ------- nakuona na ii broadcast");
 		
 	} else if( typeof msg === 'object' && msg['telephoneSerial']){
 		//Acknowledgement message from a broadcast
@@ -232,7 +310,10 @@ socketIO.on('connection', function (socket) {
 					socketID: socket.id,
 					timestamp: new Date().getTime()					
 				};
-				console.log(broadcasts[broadcastPos].broadcastListReduceBuff, "niniiiiiiiiii"); // first log to see original members before reduction
+				console.log(broadcasts[broadcastPos].broadcastListReduceBuff, "niniiiiiiiiii"); // logged to see original members before reduction
+				
+				// Initiate private conversation with our first responder
+				
 			} 
 			
 			// Now get ACK-ing clients off the buffer list - broadcastListReduceBuff
@@ -268,18 +349,27 @@ socketIO.on('connection', function (socket) {
  /**
 	* Initiates private conversation sequence with a client that responded first to a group broadcast
   **/
-function startPrivateConv(firstResponder) {
-  console.log("++++++++++++++++++++++++++++++++++++++");
-  socketIO.to(firstResponder.socketID).emit('privateSequence', firstResponder.telephoneSerial, 'You were the first, how about we talk some more!');
+var startPrivateConv = function (data) {
+	// 1. PrivateConversation init event to client (using socket ID param)
+	// 2. The client is always listening for PrivateConversation, when it receives it, it posts the message content to message list
+	// 3. Client then emits PrivateConversationStarted event to server
+	// 4. Server uses the PrivateConversationStarted event to have private conversations with a single client
+	// 5. Reason for doing this is to enable acknowlegments for messages sent to client - only available when speaking to single client via -->> socket.emit('question', 'do you think so?', function callBackHandlesACK (answer) {});
+	// 6. Inside the server's PrivateConversationStarted callback listener that handles ACK, we can do a recursive emit of the same event to keep conversation going
+	// 7. We can have a condition to determine whether to continue conversation or not (by emitting the event again)
+	// 8. Inside this callback also need to log this invocation as a successful
+	
+  console.log("++++++++++++++++ Private Conversation initiated with ", socketID, " ++++++++++++++++++++++");
+  socketIO.to(data.socketID).emit('privateSequence', data.telephoneSerial, 'You were the first, how about we talk some more!');
 }
 
 // Sends a sys message to remove a message from a single client
-function removeMessageSingle(telephoneSerial, messageID) {
+var removeMessageSingle = function (telephoneSerial, messageID) {
   
 }
 
 // Sends a sys message to remove a message from all clients in a group
-function removeMessageGroup(groupID, messageID) {
+var removeMessageGroup = function (groupID, messageID) {
   
 }
 
@@ -288,7 +378,7 @@ function removeMessageGroup(groupID, messageID) {
   * @param groups - arraystring - the group identifiers
   *
 **/
-function initBroadcast(socketIOObj, groups, message){
+var initBroadcast = function (socketIOObj, groups, message){
 	if (typeof socketIOObj !== 'object') {
 		//Missing socket IO obj arg
 		throw new Error("Must pass in the Socket IO object to init broadcast");
@@ -335,7 +425,7 @@ function initBroadcast(socketIOObj, groups, message){
 		console.log(groupInfo[groups[i]], 'weeeee')
 		socketIOObj.in(groups[i]).emit('broadcast', {content: message, messageID: messageUUID });
 		
-	}
+	
 	
 	
 	
@@ -344,11 +434,17 @@ function initBroadcast(socketIOObj, groups, message){
 
 }
 
+var dbChangeClientStatus = function(telephoneSerial, activeStatus) {
+	// TODO: validate params passed first
+	
+	//TODO: Add login to post status change to DynamoDB
+	console.log("Telephone DB status changed to Active");
+	
+}
 
 
 
-
-
+/*
 // group page
 router.get('/group/:groupID', function (req, res) {
   var groupID = req.params.groupID;
@@ -364,6 +460,52 @@ router.get('/group/:groupID', function (req, res) {
   res.render('group', {
     groupID: groupID,
     telephones: telephones
+  });
+});
+
+*/
+
+router.get('/telephone', function (req, res) {
+  var token = '';
+  let groupID = '';
+  let groupList = [];
+  if(req.query.token){
+	  token = req.query.token;
+  } else {
+	  // TODO: return error to client, session token not valid
+	  res.send(401);
+  }
+   
+  
+	//Decode the received token and ensure it is VALID and NOT EXPIRED
+	jwt.verify(token, JWT_SECRET, function(err, decoded) {
+		if(err){
+			console.error("Login failed. Invalid token sent by client. Token: ", token);
+			//send unauthorized page|message
+			res.send(401);
+		}
+		console.log("--------------------------------------------------");
+		console.log(decoded);
+		
+		groupID = decoded["telephone"]["groups"] ? decoded["telephone"]["groups"][0] : ''; // TODO: handle error incase groups list is empty for this client meaning telephone doesn't belong to any group
+		groupList = decoded["telephone"]["groups"] ? decoded["telephone"]["groups"] : [];
+	});
+  
+  let telephones = [];
+  try {
+	  telephones = Object.keys(groupInfo[groupID]);
+  } catch(err){
+	  console.error(err.message);
+	  telephones = [];
+  }
+  
+ 
+  // 渲染页面数据(见views/telGroups.hbs)
+  res.render('telGroups', {
+    groupID: groupID, // default - populate with first group in group list inside token payload
+	groupList: groupList, //Groups this telephone belongs to
+    telephones: telephones,
+	token: token
   });
 });
 
