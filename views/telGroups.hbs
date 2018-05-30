@@ -38,9 +38,9 @@
 
 <div id="telephoneInfo" >
 	<div>Telephone Serial: <span id="telephoneSerial"></span></div>
-	<div>Current Group: {{groupID}}</div>
 	<div>My Groups: {{groupList}}</div>
-	<div>Active Telephones: <span id="count">{{telephones.length}}</span></div>
+	<div>Current Group: {{groupID}}</div>
+	<div>Active Telephones in group: <span id="count">{{telephones.length}}</span></div>
 	<div>Online Telephone Serials:  <div id="telephones">{{telephones}}</div></div>
 </div>
 
@@ -131,6 +131,7 @@
       });
 	  
 	  socket.on('broadcast', function (msg) {
+	  console.log("received broadcast", msg);
 	  var message = '';
 		// First MANUALLY submit acknowledgement to server if message in sequence is msg.STARTMESSAGE
 		socket.send({				
@@ -150,13 +151,54 @@
         $('#msglog').scrollTop($('#msglog')[0].scrollHeight); 
       });
 	  
-	  socket.on('privateSequence', function (telephoneSerial, msg) {
+	  socket.on('privateConversationStarted', function (msg) {
         var message = '' +
-            '<div class="message">' +
+            '<div class="message" convID="' + msg.convID + '" id="' + msg.messageID + '">' +
             '  <span class="user"> PRIVATE: </span>' +
-            '  <span class="msg">' + msg + '</span>' +
+            '  <span class="msg">' + msg.content + '</span>' +
             '</div>';
         $('#msglog').append(message);
+		
+		// emit privateConversation event to start private conversation with server
+		// send a random message from our client
+		var randomMessages = ["Oranges", "Apples", "Mangoes", "Bananas", "Grapes", "Peach", "Guava", "End Of Conversation"];
+		
+		
+		socket.emit('privateConversation', {
+			convID: msg.convID,
+			telephoneSerial: msg.telephoneSerial,
+			messageID: uuid4(),
+			content: randomMessages[Math.floor(Math.random()* randomMessages.length)]
+		});
+		
+		// Append Client reply to window - without UUID, it shall receive 
+		
+        // 滚动条保持最下方
+        $('#msglog').scrollTop($('#msglog')[0].scrollHeight);  
+      });
+	  
+	  socket.on('privateConversation', function (msg) {
+        var message = '' +
+            '<div class="message" convID="' + msg.convID + '" id="' + msg.messageID + '">' +
+            '  <span class="user"> PRIVATE: </span>' +
+            '  <span class="msg">' + msg.content + '</span>' +
+            '</div>';
+        $('#msglog').append(message);
+		
+		// emit privateConversation event to start private conversation with server
+		// send a random message from our client
+		var randomMessages = ["Oranges", "Apples", "Mangoes", "Bananas", "Grapes", "Peach", "Guava", "End Of Conversation"];
+		
+		
+		socket.emit('privateConversation', {
+			convID: msg.convID,
+			telephoneSerial: msg.telephoneSerial,
+			messageID: uuid4(),
+			content: randomMessages[Math.floor(Math.random()* randomMessages.length)]
+		});
+		
+		// Append Client reply to window - without UUID, it shall receive 
+		
         // 滚动条保持最下方
         $('#msglog').scrollTop($('#msglog')[0].scrollHeight);  
       });
@@ -232,6 +274,32 @@
         }
 
       });
+	  
+	  var uuid4 = function () {
+		//// return uuid of form xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+		var uuid = '', ii;
+		for (ii = 0; ii < 32; ii += 1) {
+		  switch (ii) {
+		  case 8:
+		  case 20:
+			uuid += '-';
+			uuid += (Math.random() * 16 | 0).toString(16);
+			break;
+		  case 12:
+			uuid += '-';
+			uuid += '4';
+			break;
+		  case 16:
+			uuid += '-';
+			uuid += (Math.random() * 4 | 8).toString(16);
+			break;
+		  default:
+			uuid += (Math.random() * 16 | 0).toString(16);
+		  }
+		}
+		return uuid;
+	  };
+	  
     });
   </script>
 </body>

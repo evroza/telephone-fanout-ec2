@@ -74,6 +74,10 @@ var serverMessages = {untagged: []};
 */
 
 var broadcasts = [];
+var privateConversations = [];
+
+// Messages will be picked at random from this list - if message equals 'End Of Conversation' conversation shall terminate
+var randomMessages = ["Oranges", "Apples", "Mangoes", "Bananas", "Grapes", "Peach", "Guava", "End Of Conversation"];
 
 // activeClients {Object}- Stores object of all currently active clients on the Server. Failing nodes|telephones will 
 // be removed from this list and marked as inactive in DB.
@@ -100,6 +104,7 @@ var broadcasts = [];
 }
 */
 var activeClients = {};
+var decoded_token = {};
 
 
 //// With socket.io >= 1.0 ////
@@ -132,7 +137,7 @@ socketIO.on('connection', function (socket) {
   
 
   socket.on('join', function (telephoneSerial) {
-    let decoded_token = socket.decoded_token["telephone"];
+    decoded_token = socket.decoded_token["telephone"];
 	currentGroupID = decoded_token["groups"][0];
 	if(!telephoneSerial === socket.decoded_token["telephone"]["TelephoneSerial"]) {
 		console.error("Security Breach: Client is probably tampering with tokens");
@@ -167,7 +172,7 @@ socketIO.on('connection', function (socket) {
 				
 				// Add telephone to each group it is registered
 				groupInfo[decoded_token["groups"][i]][telephone] = socket.id;
-				socket.join(groupInfo[decoded_token["groups"][i]]);    // 加入组建
+				socket.join(decoded_token["groups"][i]);    // 加入组建 - Subscribe telephone to respective socket.io room with matching name
 			}
 		}
 		
@@ -254,7 +259,9 @@ socketIO.on('connection', function (socket) {
     }
 	console.log("==================================");
 	console.log(msg);
-	if(msg === 'startSequence'){
+	if(msg === 'startBroadcast'){
+		// starts a broadcast
+		
 		// Send message to group - with acknowledgements
 	    // on acknlowledge - save to array  - thus first acknowledger would be first in array
 	    // can include timestamps in save for verification
@@ -264,9 +271,28 @@ socketIO.on('connection', function (socket) {
 		//let message = {content: 'STARTMESSAGE', messageID: Math.floor(Date.now() / 1000 * Math.random())};
 		//socketIO.to(groupID).emit('sequence',telephone, message); // Broadcast to all telephones in group
 		
-		initBroadcast(socketIO, currentGroupID, "Nakuona msee ------- nakuona na ii broadcast");
+		initBroadcast(socketIO, 'group_1', "Nakuona msee ------- nakuona na ii broadcast");
 		
-	} else if( typeof msg === 'object' && msg['telephoneSerial']){
+	} else if(msg === 'startPrivate'){
+		// Starts a private conversation with sender
+		let mes = randomMessages[randomMessages.length - 1];
+		while(mes === randomMessages[randomMessages.length - 1]) {
+			// prevents server from sending the last message - let client do it
+			mes = randomMessages[Math.floor(Math.random()* randomMessages.length)];
+		}
+		
+		let data = {
+			convID: uuidv4(),
+			messageID: uuidv4(),
+			socketID: socket.id, // for this instance we are communicating with specified client int this case sender
+			content: mes,
+			telephoneSerial: decoded_token['TelephoneSerial']
+			
+
+		};
+		startPrivateConv(data);
+		
+	}else if( typeof msg === 'object' && msg['telephoneSerial']){
 		//Acknowledgement message from a broadcast
 		console.log("Acknowledge:", msg['telephoneSerial'], "time: ", msg['clientReceivedAt']);
 		console.log(socket.id);
@@ -313,7 +339,23 @@ socketIO.on('connection', function (socket) {
 				console.log(broadcasts[broadcastPos].broadcastListReduceBuff, "niniiiiiiiiii"); // logged to see original members before reduction
 				
 				// Initiate private conversation with our first responder
+				let mes = randomMessages[randomMessages.length - 1];
+				while(mes === randomMessages[randomMessages.length - 1]) {
+					// prevents server from sending the last message - let client do it
+					mes = randomMessages[Math.floor(Math.random()* randomMessages.length)];
+				}
 				
+				let data = {
+					convID: uuidv4(),
+					messageID: uuidv4(),
+					socketID: socket.id, // for this instance we are communicating with first responder
+					content: mes,
+					telephoneSerial: decoded_token['TelephoneSerial']
+					
+
+				};
+				startPrivateConv(data);
+				privateConversations.push(data);
 			} 
 			
 			// Now get ACK-ing clients off the buffer list - broadcastListReduceBuff
@@ -337,10 +379,49 @@ socketIO.on('connection', function (socket) {
 		
 	} else{
 		let message = {content: msg, messageID: Math.floor(Date.now() / 1000 * Math.random())};
-	    socketIO.to(groupID).emit('msg', telephone, message);
+	    socketIO.to(currentGroupID).emit('msg', telephone, message);
 		
 	}
 	
+  });
+  
+  socket.on('privateConversation', function (msg) {
+	  console.log(`%%%%%%%%%%%%%%%%%%%%% Conversation ID: ${msg.convID} %%%%%%%%%%%%%%%%%%%%%%%%%%%`);
+	  console.log(msg, "nini wewe");
+	  
+	  //Every emit of this privateConversation on server is also considered an ACK message for a previously sent server message
+	  // Sv == Server ; Ct == Client
+	  // a) Sv_privateConversationStarted to Ct b) Ct_privateConversation to server -- from here all events are privateConversation from both Sv and Ct
+	  // Every invocation of Sv_privateConversation is treated as ACK to previous message it sent to Ct
+	  
+	  // TODO: Record this ACK
+	  console.log("Private Conversation ACK received from: ", msg.telephoneSerial, " CoversationID: ", msg.convID, " ACK message ID: ", msg.messageID);
+	  
+	  
+	  if(msg.content !== randomMessages[randomMessages.length - 1]){
+		  // Continue with conversation untill client sends appropriate end conversation message:
+		 // In this case it will be equal the last message in our array
+		 
+		 // Initiate private conversation with our first responder
+		let mes = randomMessages[randomMessages.length - 1];
+		while(mes === randomMessages[randomMessages.length - 1]) {
+			// prevents server from sending the last message - let client do it
+			mes = randomMessages[Math.floor(Math.random()* randomMessages.length)];
+		}
+		 
+		 // Keep conversation private going
+		let data = {
+			convID: msg.convID, // we are still on same conversation so use uuid sent by client - need to validate this later
+			messageID: uuidv4(), // new uuid for current message
+			socketID: socket.id, // for this instance we are communicating with first responder
+			content: mes,
+			telephoneSerial: msg.telephoneSerial	
+
+		};
+		 
+		 socket.emit('privateConversation', data);		 
+	  }
+	  
   });
  
 });
@@ -350,17 +431,30 @@ socketIO.on('connection', function (socket) {
 	* Initiates private conversation sequence with a client that responded first to a group broadcast
   **/
 var startPrivateConv = function (data) {
-	// 1. PrivateConversation init event to client (using socket ID param)
-	// 2. The client is always listening for PrivateConversation, when it receives it, it posts the message content to message list
-	// 3. Client then emits PrivateConversationStarted event to server
-	// 4. Server uses the PrivateConversationStarted event to have private conversations with a single client
+	// data param has structure:
+	/*
+		{
+			convID: new Coversation UUID, - A new Identifier for the conversation about to start
+			messageID: new UUID,  - this starting message ID
+			socketID: Socket ID - MUST be passed to enable starting of conversation with ANY client
+			content: Message content,
+			telephoneSerial: Telephone Serial
+		}
+	*/
+	
+	// 1. PrivateConversationStarted init event to client (using socket ID param)
+	// 2. The client is always listening for PrivateConversationStarted, when it receives it, it posts the message content to message list
+	// 3. Client then emits privateConversation event to server
+	// 4. Server uses the privateConversation event to have private conversations with a single client
 	// 5. Reason for doing this is to enable acknowlegments for messages sent to client - only available when speaking to single client via -->> socket.emit('question', 'do you think so?', function callBackHandlesACK (answer) {});
-	// 6. Inside the server's PrivateConversationStarted callback listener that handles ACK, we can do a recursive emit of the same event to keep conversation going
+	// 6. Inside the server's privateConversation callback listener that handles ACK, we can do a recursive emit of the same event to keep conversation going
 	// 7. We can have a condition to determine whether to continue conversation or not (by emitting the event again)
 	// 8. Inside this callback also need to log this invocation as a successful
 	
-  console.log("++++++++++++++++ Private Conversation initiated with ", socketID, " ++++++++++++++++++++++");
-  socketIO.to(data.socketID).emit('privateSequence', data.telephoneSerial, 'You were the first, how about we talk some more!');
+	
+	
+  console.log("++++++++++++++++ Private Conversation initiated with ", data.socketID, data.telephoneSerial," ++++++++++++++++++++++");
+  socketIO.to(data.socketID).emit('privateConversationStarted', data);
 }
 
 // Sends a sys message to remove a message from a single client
@@ -425,7 +519,7 @@ var initBroadcast = function (socketIOObj, groups, message){
 		console.log(groupInfo[groups[i]], 'weeeee')
 		socketIOObj.in(groups[i]).emit('broadcast', {content: message, messageID: messageUUID });
 		
-	
+	}
 	
 	
 	
@@ -490,7 +584,7 @@ router.get('/telephone', function (req, res) {
 		groupID = decoded["telephone"]["groups"] ? decoded["telephone"]["groups"][0] : ''; // TODO: handle error incase groups list is empty for this client meaning telephone doesn't belong to any group
 		groupList = decoded["telephone"]["groups"] ? decoded["telephone"]["groups"] : [];
 	});
-  
+  // We need to get number of active telephones in group from groupInfo structure
   let telephones = [];
   try {
 	  telephones = Object.keys(groupInfo[groupID]);
