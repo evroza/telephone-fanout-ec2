@@ -74,6 +74,7 @@ var serverMessages = {untagged: []};
 */
 
 var broadcasts = [];
+
 var privateConversations = [];
 
 // Messages will be picked at random from this list - if message equals 'End Of Conversation' conversation shall terminate
@@ -338,6 +339,10 @@ socketIO.on('connection', function (socket) {
 				};
 				console.log(broadcasts[broadcastPos].broadcastListReduceBuff, "niniiiiiiiiii"); // logged to see original members before reduction
 				
+				// First remove the message from al other clients in group except firt responder - send event
+				// sending to all clients in 'group_n' room except sender
+				socket.to(broadcasts[broadcastPos].groupID).emit('sysDelMess', msg.broadcastID);
+				
 				// Initiate private conversation with our first responder
 				let mes = randomMessages[randomMessages.length - 1];
 				while(mes === randomMessages[randomMessages.length - 1]) {
@@ -507,9 +512,9 @@ var initBroadcast = function (socketIOObj, groups, message){
 		let messageUUID = uuidv4();
 		broadcasts[broadcasts.length] = {
 			id: messageUUID,
+			groupID: groups[i], // Each group/room shall have a separate broadcast
 			content: message,
 			time: new Date().getTime(),
-			// receivedFirstACK: false, -- Don't need this, can check if firstResponder is null
 			displayedFirst: true,
 			displayedAll: false,
 			firstResponder: null, // used to capture the first telephone to respond to an broadcast - Check if 
@@ -534,6 +539,31 @@ var dbChangeClientStatus = function(telephoneSerial, activeStatus) {
 	//TODO: Add login to post status change to DynamoDB
 	console.log("Telephone DB status changed to Active");
 	
+}
+
+var hideMessage = function(target, uuid){
+	/*
+	 * Hides a single message from a single telephone or group
+	 * @param target, string|array - a string or array of strings of group identifiers
+	 * @param uuid, string - a uuid string which should be uuid of message we intend to hide
+	*/
+	target = (typeof target === 'string') ? [target] : target;
+	uuid = uuid || null;
+	
+	if(!Array.isArray(target) || uuid === null){
+		throw new Error("Invalid argument types for 'target', must be array or string of group identifiers, uuid should be a uuid string");
+		console.log("Invalid argument types for 'target', must be array or string of group identifiers, uuid should be a uuid string");
+	}
+	
+	
+	
+}
+
+var hideConversation = function(target, uuid) {
+	/*
+	 * Hides entire conversation from a single telephone or group
+	 * TODO: Can be implemented later - for now ony need hidding single messages
+	*/
 }
 
 

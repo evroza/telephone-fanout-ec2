@@ -245,8 +245,13 @@
 	  
 	  // 删除消息
       socket.on('sysDelMess', function (messageID) {
-	  
-        $("'#" + messageID + "'").remove();
+		// The remove sys message will replace the existing message
+		// We shall change the class and remove it's id
+		$("div#" + messageID).attr('class', 'sysMsg'); // change the class of the message to a sys message
+        $("div#" + messageID).text("this message has been removed from client"); // change it's text to generic
+		//$("div#" + messageID).removeAttr('id'); // No need to remove the ID attribute, we might need to reshow the message
+		
+		// TODO: Succeeded, send back acknowledgement to server so it's marked as hidden on server
 		
       });
 
