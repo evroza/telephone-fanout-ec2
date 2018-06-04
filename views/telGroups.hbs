@@ -121,7 +121,7 @@
       socket.on('msg', function (telephoneSerial, msg) {
 	  console.log(telephoneSerial,msg);
         var message = '' +
-            '<div class="message" id="' + msg.messageID + '">' +
+            '<div class="message">' +
             '  <span class="user">' + telephoneSerial + ': </span>' +
             '  <span class="msg">' + msg.content + '</span>' +
             '</div>';
@@ -203,7 +203,6 @@
         $('#msglog').scrollTop($('#msglog')[0].scrollHeight);  
       });
 	  
-	  function mockSequence() {}
 	  
 	  socket.on('sequence', function (telephoneSerialRcvd, msg) {
 		var message = '';
@@ -248,18 +247,49 @@
 		// The remove sys message will replace the existing message
 		// We shall change the class and remove it's id
 		$("div#" + messageID).attr('class', 'sysMsg'); // change the class of the message to a sys message
-        $("div#" + messageID).text("this message has been removed from client"); // change it's text to generic
-		//$("div#" + messageID).removeAttr('id'); // No need to remove the ID attribute, we might need to reshow the message
-		
+		$("div#" + messageID).text("this message has been removed from client"); // change it's text to generic
+		// save the id under different attribute then remove it
+		$("div#" + messageID).attr('prevID', messageID);
+		$("div#" + messageID).removeAttr('id');		
+        		
 		// TODO: Succeeded, send back acknowledgement to server so it's marked as hidden on server
 		
       });
+
+	  $('#msglog').on('click', '.message', function(){
+	  
+			if($(this).attr('id') !== undefined){
+			
+			console.log({
+					messageID: $(this).attr('id'),
+					telephoneSerial: telephoneSerial
+			   });
+				//Log CTA clicks
+			   socket.emit('ctaClicked', {
+					messageID: $(this).attr('id'),
+					telephoneSerial: telephoneSerial
+			   });
+			}      		
+		});
 
       // 发送消息
       $('#messageInput').keydown(function (e) {
         if (e.which === 13) {
           e.preventDefault();
           var msg = $(this).val();
+          // Check if hideClientMessage message command and emit event
+          if(msg.substr(0,4) === "Tel_"){ // Might be delete message ivocation - verify further
+          	let message = msg.split("|");
+          	if(message.length === 2) {
+          		//It is a hideClientMessage invocation.
+          		// Emit hideClientMessage event
+          		socket.emit("hideClientMessage", {
+          			telephoneSerial,
+          			messageID: message[1]
+          		});
+          	}
+          }
+          
           $(this).val('');
 
           socket.send(msg);

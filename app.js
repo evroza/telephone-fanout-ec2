@@ -22,20 +22,6 @@ var socketIO = IO(server);
 // 组建电话号名单
 var groupInfo = {};
 
-// serverMessages - Stores array of server message objects {messageID: MESSAGE_ID, contents: CONTENTS, timestamp: 131312323}
-/*
-	{
-		untagged: [{telephoneSerial: TELEPHONE_SERIAL, socketID: SOCKET_ID_OF_CLIENT, messageID: MESSAGE_ID, contents: CONTENTS}, .....],
-		group_1 : [{messageID: MESSAGE_ID, contents: CONTENTS, timestamp: 131312323}, .....],
-		group_2: [{messageID: MESSAGE_ID, contents: CONTENTS, timestamp: 131312323}, .....],
-		.
-		.
-		.
-	}
-*/
-var serverMessages = {untagged: []};
-
-
 // broadcasts [Array]- Stores array of boraodcast messages initiated by server as well as associated metadata
 /*
 	[
@@ -75,7 +61,59 @@ var serverMessages = {untagged: []};
 
 var broadcasts = [];
 
-var privateConversations = [];
+/*
+	conversations stores an array of all server to client message groups as well corresponding responses - all to a single client|telephones
+	-it has the following structure:
+	// When conversations will be stored in DB later, conversations and messages MUST be in different tables
+  	// In table with messages only, it will have uuid as primary key and conversation uuid as secondary indexing field
+  	// That way we can find message in one swoop
+  	// and can return all messages belonging to conversation if we have the conversation id
+  	// In conversations table, Conversation uuid will be primary key and telephoneSerial will be secondary indexing field
+  	// Thus we can find conversation in one sweep if we know it's uuid
+  	// and we can return all conversations belonging to a single telephone if we have telephoneSerial
+
+  	Purpose of this separation is to avoid looping through all conversations when trying to locate message with particular ID too expensive!
+
+	[
+		{
+			conversationID: UUID,
+			telephoneSerial: Telephone Serial, - client with which conversation occured
+			socketID: socket ID of telephone client,
+			correspondingBroadcastID: null|uuid - null if conversation not associated with broadcast. If started with first responder to broadcast then contains correspoinding broadcast id
+			timeInit: Timestamp, conversation started
+			timeEnd: Timestamp, conversation ended
+			displayed: true|false, - CONVERSATION displayed or not on telephone
+			messages: [ ---> First entry made on first ACK receipt, all appended to this list
+				{
+					messageID: UUID, - message uuid
+					content: 'Message text contents',
+					timeStamp: Timestamp, - when message was sent
+					displayed: true|false, - MESSAGE displayed or not on telephone
+
+					clickedCTATime: [Array of timestamps when clicked by this telephone]			
+				}, ...],
+						
+		},
+		.
+		.
+		.
+	]
+*/
+
+var conversations = [];
+
+/*
+	Stores the streaming list of clicks that occur on any of our CTA messages posted to clients
+	Has following structure:
+	[{
+		messageID: uuid of message that was clicked - might be broadcast id if it was a broadcast message; otherwise it's message uuid
+		telephoneSerial: Telephone serial, of client that clicked
+		timestamp: Timestamp, of when click was received on server
+		socketId: socketID of clicker
+	}, ...]
+*/
+
+var ctaClicks = [];
 
 // Messages will be picked at random from this list - if message equals 'End Of Conversation' conversation shall terminate
 var randomMessages = ["Oranges", "Apples", "Mangoes", "Bananas", "Grapes", "Peach", "Guava", "End Of Conversation"];
@@ -360,7 +398,7 @@ socketIO.on('connection', function (socket) {
 
 				};
 				startPrivateConv(data);
-				privateConversations.push(data);
+				conversations.push(data);
 			} 
 			
 			// Now get ACK-ing clients off the buffer list - broadcastListReduceBuff
@@ -382,8 +420,19 @@ socketIO.on('connection', function (socket) {
 		
 				
 		
-	} else{
-		let message = {content: msg, messageID: Math.floor(Date.now() / 1000 * Math.random())};
+	} else if(msg === 'group_5'){
+		let message = {content: "Hello group 5 --- TESTING message", messageID: Math.floor(Date.now() / 1000 * Math.random())};
+		socketIO.to("group_5").emit('msg', telephone, message);
+	} else if(msg === 'group_6'){
+		let message = {content: "Hello group 6 --- TESTING message", messageID: Math.floor(Date.now() / 1000 * Math.random())};
+		socketIO.to("group_6").emit('msg', telephone, message);
+	} else {
+		// Messages of this type are only used to troubleshoot group connectivity of clients
+		// Thus DO NOT - give them uuid, 
+		// 			   - store them to message list data structure
+		// Ony ECHO them to them within the group and that's the end of it
+		// Can disable these echos anytime without effect on rest of functions
+		let message = {content: msg/*, messageID: Math.floor(Date.now() / 1000 * Math.random())*/};
 	    socketIO.to(currentGroupID).emit('msg', telephone, message);
 		
 	}
@@ -427,6 +476,49 @@ socketIO.on('connection', function (socket) {
 		 socket.emit('privateConversation', data);		 
 	  }
 	  
+  });
+
+  socket.on('ctaClicked', function(data){
+  	/*[{
+		messageID: uuid of message that was clicked - might be broadcast id if it was a broadcast message; otherwise it's message uuid
+		telephoneSerial: Telephone serial, of client that clicked
+		timestamp: Timestamp, of when click was received on server
+		socketId: socketID of clicker
+	}, ...]*/
+	
+	let click = {
+		messageID: data.messageID,
+		telephoneSerial: data.telephoneSerial, //sent by client
+		socketID: socket.id,
+		timestamp: new Date().getTime(),
+
+	};
+
+	console.log('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@');
+	console.log('CTA click occured! Details: ', click);
+
+	// record the CTA click
+	ctaClicks.push(click);
+
+	// TODO: post CTA to db
+
+  });
+
+  socket.on('hideClientMessage', function(data){
+  	// 1. emit hideMessage event to client
+  	// 2. on callback success then mark message as hidden in message
+  	// -- Procedure of marking message hidden, for all conversations with this telephoneSerial, search for message with this uuid and mark as hidden, break out of loop
+  	// For now since messages not stored in separate DB table, loop through all conversations of telephoneSerial to find message with matching uuid
+  	// start looping from back of array for efficiency, it is likely the message we want to hide is a recent one
+
+  	for (let i = conversations.length - 1; i >= 0; i--){
+  		// Loop from back of conversations list
+  		if(true) {
+  			console.log(true);
+  		}
+  	}
+
+
   });
  
 });
