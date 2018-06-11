@@ -62,7 +62,7 @@ var groupInfo = {};
 var broadcasts = [];
 
 /*
-	conversations stores an array of all server to client message groups as well corresponding responses - all to a single client|telephones
+	conversations - stores an array of all server to client message groups as well corresponding responses - all to a single client|telephones
 	-it has the following structure:
 	// When conversations will be stored in DB later, conversations and messages MUST be in different tables
   	// In table with messages only, it will have uuid as primary key and conversation uuid as secondary indexing field
@@ -103,7 +103,7 @@ var broadcasts = [];
 var conversations = [];
 
 /*
-	Stores the streaming list of clicks that occur on any of our CTA messages posted to clients
+	ctaClicks - Stores the streaming list of clicks that occur on any of our CTA messages posted to clients
 	Has following structure:
 	[{
 		messageID: uuid of message that was clicked - might be broadcast id if it was a broadcast message; otherwise it's message uuid
@@ -221,7 +221,7 @@ socketIO.on('connection', function (socket) {
 		dbChangeClientStatus(telephone, true);
 		
 		// 通知组建内人员
-		socketIO.to(groupID).emit('sys', telephone + '加入了组建', Object.keys(groupInfo[groupID]));  
+		socketIO.to(groupID).emit('sys', telephone + ' just became active', Object.keys(groupInfo[groupID]));  
 		console.log(telephone + '加入了' + groupID);
 		
 		
@@ -267,7 +267,7 @@ socketIO.on('connection', function (socket) {
 			// Leave each socket group in list
 			// But don't deregister in DB, just here to make it inactive
 			socket.leave(decoded_token['groups'][i]);    // 退出组建
-			socketIO.to(decoded_token['groups'][i]).emit('sys', telephone + '退出了组建', Object.keys(groupInfo[decoded_token['groups'][i]]));
+			socketIO.to(decoded_token['groups'][i]).emit('sys', telephone + ' opted out of server messages', Object.keys(groupInfo[decoded_token['groups'][i]]));
 			console.log(telephone + 'exit group' + groupID);
 			
 			//for each group in groupInfo active clients OBJECT list, remove this telephone groupInfo[decoded_token['groups'][i]]
@@ -391,6 +391,8 @@ socketIO.on('connection', function (socket) {
 				let data = {
 					convID: uuidv4(),
 					messageID: uuidv4(),
+					parentMessageID: broadcasts[broadcastPos].id,
+					timeInit: new Date().getTime(),
 					socketID: socket.id, // for this instance we are communicating with first responder
 					content: mes,
 					telephoneSerial: decoded_token['TelephoneSerial']
@@ -398,6 +400,10 @@ socketIO.on('connection', function (socket) {
 
 				};
 				startPrivateConv(data);
+				
+
+				// First remove unnecesary fields
+				delete data['message']
 				conversations.push(data);
 			} 
 			

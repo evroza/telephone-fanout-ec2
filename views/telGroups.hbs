@@ -6,12 +6,14 @@
   <style>
     #msglog, #messageInput {
       border: 1px solid #ccc;
-      width: 500px;
+      width: 99%;
       height: 350px;
       overflow-y: auto;
       font-size: 14px;
+	  background-color: #fff;
     }
     #messageInput {
+		width: 98%;
       height: 80px;
     }
     .message {
@@ -32,29 +34,63 @@
       width: 490px;
       padding: 0 5px 5px;
     }
+	body {
+		background-color: #3498db;
+		font-size: 14px;
+		font-family: sans-serif;
+	}
+	#main-content {
+		
+		height: 100%;
+		width: 40em;
+		margin: auto;
+		overflow:hidden;
+	}
+	#telephoneInfo {
+		font-weight: 600;
+		
+	}
+	button {
+		border-color: #3f87a6;
+		color: #29627e;
+		cursor: pointer;
+		display: inline-block;
+		line-height: 1;
+		font-weight: 700;
+		letter-spacing: normal;
+		border: 2px solid #9b9b9b;
+		background-color: #fff;
+		padding: 5px 11px;
+		font-size: 1rem;
+		font-family: "Open Sans",arial,x-locale-body,sans-serif;
+		font-style: normal;
+	}
+	
   </style>
 </head>
 <body>
+<div id="main-content">
+	<div id="telephoneInfo" >
+		<div style="margin-bottom: 0.3em;">Telephone Serial: <span id="telephoneSerial"></span></div>
+		<div style="margin-bottom: 0.3em;">My Groups: {{groupList}}</div>
+		<div style="margin-bottom: 0.3em;">Current Group: {{groupID}}</div>
+		<div style="margin-bottom: 0.3em;">Active Telephones in group: <span id="count">{{telephones.length}}</span></div>
+		<div style="color: white;">Online Telephone Serials:  <div style="color: #fbff0b;" id="telephones">{{telephones}}</div></div>
+	</div>
 
-<div id="telephoneInfo" >
-	<div>Telephone Serial: <span id="telephoneSerial"></span></div>
-	<div>My Groups: {{groupList}}</div>
-	<div>Current Group: {{groupID}}</div>
-	<div>Active Telephones in group: <span id="count">{{telephones.length}}</span></div>
-	<div>Online Telephone Serials:  <div id="telephones">{{telephones}}</div></div>
+
+	  <div id="msglog">
+
+	  </div>
+	  <textarea name="message" id="messageInput"></textarea>
+	  <br/>
+	  Press enter to send message
+	  <button id="joinOrLeave">Deactivate Listening</button>
+	  
+	  <!-- auth token received from server -->
+	  <div id="tokenInput" style="display: none;" value="{{token}}"></div>
+
 </div>
-
-
-  <div id="msglog">
-
-  </div>
-  <textarea name="message" id="messageInput"></textarea>
-  <br/>
-  Press enter to send message
-  <button id="joinOrLeave">Deactivate Listening</button>
-  
-  <!-- auth token received from server -->
-  <div id="tokenInput" style="display: none;" value="{{token}}"></div>
   
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/jquery.js"></script>
@@ -298,7 +334,7 @@
 
       // Exit Group
       $('#joinOrLeave').click(function () {
-        if ($(this).text() === 'Exit Group') {
+        if ($(this).text() === 'Deactivate Listening') {
           $(this).text('Activate Listening');
           socket.emit('leave');
           var msg = 'You shall no longer receive messages from server, Click "Listen"';
