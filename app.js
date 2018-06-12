@@ -76,7 +76,7 @@ var broadcasts = [];
 
 	[
 		{
-			conversationID: UUID,
+			convID: UUID,
 			telephoneSerial: Telephone Serial, - client with which conversation occured
 			socketID: socket ID of telephone client,
 			correspondingBroadcastID: null|uuid - null if conversation not associated with broadcast. If started with first responder to broadcast then contains correspoinding broadcast id
@@ -203,7 +203,7 @@ socketIO.on('connection', function (socket) {
 			// Then take it out and then add afresh
 			if (!activeClients[telephone]) {
 				// Add to active telephones list
-				activeClients["telephone"] = {
+				activeClients[telephone] = {
 					socketID: socket.id,
 					lastLogin: new Date().getTime(),
 					recentMessages: []
@@ -299,6 +299,8 @@ socketIO.on('connection', function (socket) {
 	console.log("==================================");
 	console.log(msg);
 	if(msg === 'startBroadcast'){
+		//TODO: Change the way broadcasts are initiated so that initiation passes in the first CUSTOMIZED message from admin
+		
 		// starts a broadcast
 		
 		// Send message to group - with acknowledgements
@@ -310,28 +312,13 @@ socketIO.on('connection', function (socket) {
 		//let message = {content: 'STARTMESSAGE', messageID: Math.floor(Date.now() / 1000 * Math.random())};
 		//socketIO.to(groupID).emit('sequence',telephone, message); // Broadcast to all telephones in group
 		
+		// for now, add this initial broadcast message to respective broadcasts array
+		
 		initBroadcast(socketIO, 'group_1', "Nakuona msee ------- nakuona na ii broadcast");
 		
-	} else if(msg === 'startPrivate'){
-		// Starts a private conversation with sender
-		let mes = randomMessages[randomMessages.length - 1];
-		while(mes === randomMessages[randomMessages.length - 1]) {
-			// prevents server from sending the last message - let client do it
-			mes = randomMessages[Math.floor(Math.random()* randomMessages.length)];
-		}
+		// have to log this first message as the first message in a broadcast sequence
 		
-		let data = {
-			convID: uuidv4(),
-			messageID: uuidv4(),
-			socketID: socket.id, // for this instance we are communicating with specified client int this case sender
-			content: mes,
-			telephoneSerial: decoded_token['TelephoneSerial']
-			
-
-		};
-		startPrivateConv(data);
-		
-	}else if( typeof msg === 'object' && msg['telephoneSerial']){
+	} else if( typeof msg === 'object' && msg['telephoneSerial'] && msg["broadcastACK"]){ // messages matching this structure are ACKS to a broadcast
 		//Acknowledgement message from a broadcast
 		console.log("Acknowledge:", msg['telephoneSerial'], "time: ", msg['clientReceivedAt']);
 		console.log(socket.id);
@@ -368,7 +355,7 @@ socketIO.on('connection', function (socket) {
 			
 			//If first ACK responder log his  special info
 			// If firstResponder is not null then already received first response
-			if(broadcasts[broadcastPos].firstResponder === null){
+			if(broadcasts[broadcastPos].firstResponder  === null){
 				// This is the first ACK responder to our broadcast
 				broadcasts[broadcastPos].firstResponder = {
 					telephoneSerial: telephone,
@@ -377,7 +364,7 @@ socketIO.on('connection', function (socket) {
 				};
 				console.log(broadcasts[broadcastPos].broadcastListReduceBuff, "niniiiiiiiiii"); // logged to see original members before reduction
 				
-				// First remove the message from al other clients in group except firt responder - send event
+				// First remove the message from all other clients in group except firt responder - send event
 				// sending to all clients in 'group_n' room except sender
 				socket.to(broadcasts[broadcastPos].groupID).emit('sysDelMess', msg.broadcastID);
 				
@@ -401,10 +388,6 @@ socketIO.on('connection', function (socket) {
 				};
 				startPrivateConv(data);
 				
-
-				// First remove unnecesary fields
-				delete data['message']
-				conversations.push(data);
 			} 
 			
 			// Now get ACK-ing clients off the buffer list - broadcastListReduceBuff
@@ -445,6 +428,49 @@ socketIO.on('connection', function (socket) {
 	
   });
   
+  socket.on('startPrivate', function (msg) {
+		console.log(activeClients, "niniiiiiiiiiiiiiiiiiiiiii");
+	  
+		// Starts a private conversation with specified Telephone
+		let mes = randomMessages[randomMessages.length - 1];
+		while(mes === randomMessages[randomMessages.length - 1]) {
+			// prevents server from sending the last message - let client do it
+			mes = randomMessages[Math.floor(Math.random()* randomMessages.length)];
+		}
+		let telSocketID = null;
+		
+		try{
+			if(activeClients[msg.telephoneSerial]) {
+				// Telephone with msg.telephoneSerial is logged in and ACTIVE -- can begin private conversation with it
+				telSocketID = activeClients[msg.telephoneSerial].socketID;	
+			} else{
+				// TelephoneSerial specified not on activeClients object - abort and return error message
+			}
+					
+		} catch(err) {
+			console.error(err);
+			console.error("There was an error starting private conversation with specified Telephone - maybe telephone specified exist?");
+			
+		}
+		let data = {
+			convID: uuidv4(),
+			messageID: uuidv4(),
+			timeInit: new Date().getTime(),
+			socketID: activeClients[msg.telephoneSerial].socketID, // for this instance we are communicating with specified client
+			content: mes,
+			timeEnd: null,
+			telephoneSerial: msg.telephoneSerial //TODO; Make this configurable later - passed in in start Private call- so that can be started with any telephone the server chooses
+			
+
+		};
+		
+		startPrivateConv(data);
+				
+	
+	  
+	  
+  });
+  
   socket.on('privateConversation', function (msg) {
 	  console.log(`%%%%%%%%%%%%%%%%%%%%% Conversation ID: ${msg.convID} %%%%%%%%%%%%%%%%%%%%%%%%%%%`);
 	  console.log(msg, "nini wewe");
@@ -454,7 +480,29 @@ socketIO.on('connection', function (socket) {
 	  // a) Sv_privateConversationStarted to Ct b) Ct_privateConversation to server -- from here all events are privateConversation from both Sv and Ct
 	  // Every invocation of Sv_privateConversation is treated as ACK to previous message it sent to Ct
 	  
-	  // TODO: Record this ACK
+	  // Record each ACK(which is also the client reply to a private conv) to the the conversations' array respective object
+	  // procedure - loop back from conversations array end and match 'convID' the push this message to end of messages array of that conversation
+	  
+	  //This procedure inneficient, in the long run we'd just prefer pushing messages to the end of a messages array and 
+	  // in case the admin or client needs to return a particular message from a particulr conversation they can do a query
+	  // since messages would have convID attatched to them, and telephone ID's too
+	  let convPos = null; // for efficiency - prevents looping again when saving server response to client later on
+	  for (let i = conversations.length - 1; i >= 0; i--){
+		  // for saving client replies -- later need to save server responses if any needed
+		  if(msg.convID === conversations[i].convID){
+			  convPos = i;
+			  //found our conversation of interest, push the message to array and break out of loop
+			  conversations[i]["messages"].push({
+				  messageID: msg.messageID,
+				  content: msg.content,
+				  displayed: true,
+				  timeStamp: new Date().getTime(),
+				  clickedCTATime: [] // array of timestamps
+			  });
+			  break;
+		  }
+	  }		
+	  
 	  console.log("Private Conversation ACK received from: ", msg.telephoneSerial, " CoversationID: ", msg.convID, " ACK message ID: ", msg.messageID);
 	  
 	  
@@ -473,11 +521,20 @@ socketIO.on('connection', function (socket) {
 		let data = {
 			convID: msg.convID, // we are still on same conversation so use uuid sent by client - need to validate this later
 			messageID: uuidv4(), // new uuid for current message
-			socketID: socket.id, // for this instance we are communicating with first responder
+			socketID: socket.id, // might not be neccesary but just save it
 			content: mes,
 			telephoneSerial: msg.telephoneSerial	
 
 		};
+		
+		// record every next server message of a conversation to the respective object before broadcast
+		conversations[convPos]["messages"].push({
+			  messageID: data.messageID,
+			  content: data.content,
+			  displayed: true,
+			  timeStamp: new Date().getTime(),
+			  clickedCTATime: [] // array of timestamps
+		});
 		 
 		 socket.emit('privateConversation', data);		 
 	  }
@@ -511,18 +568,62 @@ socketIO.on('connection', function (socket) {
   });
 
   socket.on('hideClientMessage', function(data){
+	  console.log("Hide message: ", data.messageID, " on telephone: ", data.telephoneSerial, " initiated");
   	// 1. emit hideMessage event to client
   	// 2. on callback success then mark message as hidden in message
   	// -- Procedure of marking message hidden, for all conversations with this telephoneSerial, search for message with this uuid and mark as hidden, break out of loop
   	// For now since messages not stored in separate DB table, loop through all conversations of telephoneSerial to find message with matching uuid
   	// start looping from back of array for efficiency, it is likely the message we want to hide is a recent one
 
+	//TODO: instead of performing such expensive search on the live data structure, when saves are enabled to dynamodb, do a query on db instead
+	let alreadyFound = false; // for breaking out of outer loop when inner loop condition satisfied
   	for (let i = conversations.length - 1; i >= 0; i--){
   		// Loop from back of conversations list
-  		if(true) {
-  			console.log(true);
+		console.log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!! - ", conversations[i].telephoneSerial);
+  		if(conversations[i].telephoneSerial === data.telephoneSerial) {
+  			//only check conversations with matching telephone serial
+			console.log("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@2");
+			
+			//loop through all messages in each conversation of this telephone until we find it, start from back of each array
+			for (let j = conversations[i]["messages"].length - 1; j >= 0; j--){
+				console.log("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^");
+				console.log(conversations[i]["messages"][j]);
+				if(conversations[i]["messages"][j]["messageID"] === data.messageID){
+					// found message emit hide message event to specified TelephoneID, thus will be hidden if telephone logged in
+					// will also immediately mark message as hidden on server. So that this is persisted between logins incase we need to load old messages
+					
+					conversations[i]["messages"][j]["messageID"].displayed = false;
+					
+					//find telephone's socket if it is currently logged in and hide this message
+					//TODO: future iterations might want to autodetect hidden messages on next 'active' by client and autohide|show messages whose statuses changed while inactive/logged out
+					
+					try {
+						// Try hidding on client if client active
+						console.log(activeClients, "%%%%%%%%%%6%---------------%%%%%%%%%%%%%%%%%%55");
+						let sock = activeClients[data.telephoneSerial].socketID;
+						socketIO.to(sock).emit('sysDelMess', data.messageID);
+					} catch(err) {
+						console.log(err);
+						console.log("Failed to send the remove message instruction to telephone, the telephone isn't on the active list, only removed from DB");
+					}
+					activeClients
+					
+					
+					
+					// found the message to be hidden in current conversation break out
+					alreadyFound = true;
+					break
+				}
+			}
+			
+			if (alreadyFound) break; // breaks out of outer loop
+			
   		}
   	}
+	
+	if(!alreadyFound){
+		console.log("Couldn't find the message on the server!");		
+	}
 
 
   });
@@ -532,6 +633,7 @@ socketIO.on('connection', function (socket) {
 
  /**
 	* Initiates private conversation sequence with a client that responded first to a group broadcast
+	* Initiates private conversation with any client telephone selected by admin
   **/
 var startPrivateConv = function (data) {
 	// data param has structure:
@@ -554,10 +656,56 @@ var startPrivateConv = function (data) {
 	// 7. We can have a condition to determine whether to continue conversation or not (by emitting the event again)
 	// 8. Inside this callback also need to log this invocation as a successful
 	
+	//TODO: use timer to check first ACK from a private conversation offshoot from a broadcast is received
+	// A timer must be started incase this private conversation start is of the type offshot from a broadcast, if the 
+	// current conversation fails to receive ACK within that timeout, mark first responder to a broadcast as failing to have contiinued conversation
 	
 	
   console.log("++++++++++++++++ Private Conversation initiated with ", data.socketID, data.telephoneSerial," ++++++++++++++++++++++");
   socketIO.to(data.socketID).emit('privateConversationStarted', data);
+  
+  
+  
+  // record the start of a conversation to the conversations array
+  // the data object parameter passed to this function may have to be marshalled differently depending on the trigger method of 
+  // the private conversation - this is because it's contents might vary
+  if(typeof data.parentMessageID === "string") {
+	 // This private conversation was started via broadcast offshoot from first responder of a broadcast
+	  
+	// Below modifications are to marshal it for storage into conversations data structure.
+	// Remember since this is the message sent to first responder, it is now classified as Conversation
+	// We retain it's parent broadcast UUID for later tree linking
+	data["messages"] = [{
+		messageID: uuidv4(),
+		content: data.content,
+		displayed: true,
+		timeStamp: data.timeInit,
+		clickedCTATime: [] // array of timestamps
+	}];
+	data["timeEnd"] = null;
+	
+	//delete redudant data
+	delete data["messageID"];
+	
+	conversations.push(data);
+  } else {
+	  // This private conversation is a regular one triggered simply by admin sending a message
+	  // save this conversation and later add all associated messages to it's constituent 'messages' array
+		data["messages"] = [{
+			messageID: uuidv4(),
+			content: data.content,
+			displayed: true,
+			timeStamp: data.timeInit,
+			clickedCTATime: [] // array of timestamps
+		}];
+		data["timeEnd"] = null;
+		
+		//delete redudant data
+		delete data["messageID"];
+		
+		conversations.push(data);
+  }
+  
 }
 
 // Sends a sys message to remove a message from a single client

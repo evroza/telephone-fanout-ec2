@@ -11,11 +11,16 @@
       overflow-y: auto;
       font-size: 14px;
 	  background-color: #fff;
+	  border-radius: 10px;
     }
     #messageInput {
 		width: 98%;
-      height: 80px;
+		height: 80px;
+		border-radius: 0 0 10px 10px;
     }
+	#msglog {
+		border-radius: 10px 10px 0 0;
+	}
     .message {
       line-height: 22px;
     }
@@ -51,6 +56,7 @@
 		
 	}
 	button {
+		border-radius: 5px;
 		border-color: #3f87a6;
 		color: #29627e;
 		cursor: pointer;
@@ -78,7 +84,7 @@
 		<div style="color: white;">Online Telephone Serials:  <div style="color: #fbff0b;" id="telephones">{{telephones}}</div></div>
 	</div>
 
-
+		
 	  <div id="msglog">
 
 	  </div>
@@ -169,11 +175,12 @@
 	  socket.on('broadcast', function (msg) {
 	  console.log("received broadcast", msg);
 	  var message = '';
-		// First MANUALLY submit acknowledgement to server if message in sequence is msg.STARTMESSAGE
+		// First MANUALLY submit acknowledgement to server
 		socket.send({				
 			telephoneSerial,
 			broadcastID: msg.messageID,
-			clientReceivedAt: new Date().getTime()
+			clientReceivedAt: new Date().getTime(),
+			broadcastACK: true
 		});
 		message = '' +
 		'<div class="message" id="' + msg.messageID +'">' +
@@ -195,7 +202,7 @@
             '</div>';
         $('#msglog').append(message);
 		
-		// emit privateConversation event to start private conversation with server
+		// emit privateConversation event to continue private conversation with server
 		// send a random message from our client
 		var randomMessages = ["Oranges", "Apples", "Mangoes", "Bananas", "Grapes", "Peach", "Guava", "End Of Conversation"];
 		
@@ -271,6 +278,12 @@
 
       // 监听系统消息
       socket.on('sys', function (sysMsg, telephones) {
+		// sys messages have various functions including signaling coming online for clients
+		// So on receipt, verify client whether marked inactive and 'make active'
+		if($('#joinOrLeave').text() === "Activate Listening"){
+			// client was marked as incative, can activate it
+			$('#joinOrLeave').text("Deactivate Listening");
+		}
         var message = '<div class="sysMsg">' + sysMsg + '</div>';
         $('#msglog').append(message);
 
@@ -314,7 +327,7 @@
           e.preventDefault();
           var msg = $(this).val();
           // Check if hideClientMessage message command and emit event
-          if(msg.substr(0,4) === "Tel_"){ // Might be delete message ivocation - verify further
+          if(msg.substr(0,4) === "Tel_"){ // Might be hide message ivocation - verify further
           	let message = msg.split("|");
           	if(message.length === 2) {
           		//It is a hideClientMessage invocation.
@@ -324,11 +337,26 @@
           			messageID: message[1]
           		});
           	}
-          }
-          
-          $(this).val('');
+          } else if(msg.substr(0,12) === "startPrivate") {
+			let message = msg.split("|");
+          	if(message.length === 2) {
+				//It is a startPrivate invocation.
+          		// Emit startPrivate event
+          		socket.emit("startPrivate", {
+          			telephoneSerial: msg[1]
+          		});
+			} else {
+				// By startPrivate with self
+				socket.emit("startPrivate", {
+          			telephoneSerial: telephoneSerial
+          		});
+			}
+		  } else {
+			
 
-          socket.send(msg);
+			socket.send(msg);
+		  }         
+          $(this).val('');
         }
       });
 
